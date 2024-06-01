@@ -1,68 +1,130 @@
-import socketserver
+import socket
+import threading
 
-class ServerHandler(socketserver.BaseRequestHandler):
-    # 접속 유저 관리
-    users = {}
-    clients = []
+# 접속 유저 관리
+users = {} # user 정보 목록
+clients = [] # client socket 목록
+rooms = {} # 채팅방 목록
 
-    def readUserFile(self):
+def read_user_file():
+    try:
+        with open("onlineUsers.txt", 'r') as f:
+            return f.read()
+    except FileNotFoundError:
+        return "파일을 찾을 수 없습니다."
+
+def update_users():
+    for clientSocket in clients:
+        userList = "\n\n<현재 접속 중인 User List>\n" + read_user_file()
+        clientSocket.send(userList.encode())
+
+def write_user_file():
+    with open("onlineUsers.txt", 'w') as f:
+        for nickname, (ip, port, _) in users.items():
+            user_data = f"Id: {nickname}\nIP: {ip}\nPort: {port}\n"
+            f.write(user_data + '\n')
+
+def handle_client(clientSocket, client_address):
+    ip, port = client_address
+    print(f"클라이언트 {ip}:{port} 연결")
+
+    nickname = ""
+    while True:
+        clientSocket.send("닉네임을 입력하세요: ".encode())
+        nickname = clientSocket.recv(1024).decode().strip()
+        if nickname in users:
+            clientSocket.send("이미 사용 중인 닉네임입니다. 다른 닉네임을 입력하세요: ".encode())
+        elif not nickname:
+            clientSocket.send("올바른 닉네임을 입력해주세요.".encode())
+        else:
+            clientSocket.send(f"환영합니다. {nickname}님".encode())
+            break 
+
+    users[nickname] = [ip, port, clientSocket]
+    write_user_file()
+    update_users()
+    clients.append(clientSocket) # 사용자 socket 저장
+    userList = "<현재 접속 중인 User List>\n" + read_user_file()
+    clientSocket.send(userList.encode())
+
+    while True: # 명령어 검사 및 기능
         try:
-            with open("onlineUsers.txt", 'r') as f:
-                return f.read()
-        except FileNotFoundError:
-            return "파일을 찾을 수 없습니다."
-    
-    def updateUsers(self):
-        for i in self.clients:
-            userList = "\n\n                                                                                                                                                                                                                                                                                                          <현재 접속 중인 User List>\n" + self.readUserFile()
-            i.send(userList.encode())
-        
-    def writeUserFile(self):
-        with open("onlineUsers.txt", 'w') as f:
-            for nickname, (ip, port) in self.users.items():
-                userData = f"Id: {nickname}\nIP: {ip}\nPort: {port}\n"
-                f.write(userData + '\n')
-    
-    def handle(self):
-        ip, port = self.client_address
-        print("클라이언트 연결")
-        nickname = "" 
-              
-        while True:
-            self.request.send("닉네임을 입력하세요".encode())
-            nickname = self.request.recv(1024).decode().strip()
-            if nickname in self.users:
-                self.request.send("이미 사용 중인 닉네임입니다. 다른 닉네임을 입력하세요: ".encode())
-            elif not nickname:
-                self.request.send("올바른 닉네임을 입력해주세요.".encode())
-            else:
-                self.request.send(f"환영합니다. {nickname}님".encode())
-                break 
-            
-        self.users[nickname] = (ip, port)
-        self.writeUserFile()  # 새로운 사용자가 추가되면 파일에 새로 쓰기
-        self.updateUsers()
-        self.clients.append(self.request) # 사용자 socket저장
-        userList = "<현재 접속 중인 User List>\n" + self.readUserFile()
-        self.request.send(userList.encode())
-
-        while True:
-            try:
-                data = self.request.recv(1024).decode().strip()
-                if not data:
-                    break
-            except ConnectionResetError:
+            data = clientSocket.recv(1024).decode().strip()
+            if not data:
                 break
 
-        if nickname in self.users:
-            del self.users[nickname]
-            self.writeUserFile()  # 사용자가 나가면 파일에서 삭제
+            if data.startswith('/sendR'):
+                _, roomName, c_msg = data.split(' ', 2)
+                if roomName in rooms:
+                    for client in rooms[roomName]:
+                        client.send(f"\n{nickname}: {c_msg}".encode())
+                else:
+                    clientSocket.send(f"{roomName}을 찾을 수 없습니다.".encode())
+            
+            elif data.startswith('/create'):
+                _, roomName = data.split(' ', 1)
+                if roomName not in rooms:
+                    rooms[roomName] = [users[nickname][2]]
+                    clientSocket.send(f"\"{roomName}\"을 만들었습니다.".encode())
+                else:
+                    clientSocket.send(f"{roomName}이 이미 존재합니다.".encode())
+                
+            elif data.startswith('/invite'):
+                _, userName, roomName = data.split(' ')
+                if roomName in rooms:
+                    if userName in users:
+                        if users[userName][2] not in rooms[roomName]:
+                            rooms[roomName].append(users[userName][2])
+                            users[userName][2].send(f"{nickname}님이 당신을 {roomName}에 초대했습니다.".encode())
+                            clientSocket.send(f"{userName}을 {roomName}에 초대했습니다.".encode())
+                        else:
+                            clientSocket.send(f"{userName}가 {roomName}에 이미 존재합니다.".encode())
+                    else:
+                        clientSocket.send(f"사용자 {userName}를 찾을 수 없습니다.".encode())
+                else:
+                    clientSocket.send(f"{roomName}을 찾을 수 없습니다.".encode())
+                
+            elif data.startswith('/send'):
+                _, userName, c_msg = data.split(' ', 2)
+                if userName in users:
+                    clientSocket.send(f"\n{nickname}: {c_msg}".encode())
+                    users[userName][2].send(f"\n{nickname}: {c_msg}".encode())
+                else:
+                    clientSocket.send(f"사용자 {userName}를 찾을 수 없습니다.".encode())
 
-class ChatServer(socketserver.ThreadingMixIn, socketserver.TCPServer):
-    pass
+            elif data.startswith('/del'):
+                _, roomName = data.split(' ', 1)
+                if roomName in rooms:
+                    del rooms[roomName]
+                    clientSocket.send(f"\"{roomName}\"을 삭제했습니다.".encode())
+                else:
+                    clientSocket.send(f"{roomName}을 찾을 수 없습니다.".encode())
+
+            elif data == 'roomlist':
+                clientSocket.send(f"{rooms}".encode())
+            else:
+                clientSocket.send("명령어를 다시 입력 해주세요.".encode())
+
+        except Exception as e:
+            print(f"Error in {nickname}: {e}")
+            break
+
+    if nickname in users: # 사용자 삭제
+        del users[nickname]
+        write_user_file()
+        update_users()
 
 if __name__ == "__main__":
+    HOST = "localhost"
+    PORT = 8000
+
+    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server_socket.bind((HOST, PORT))
+    server_socket.listen(10)
+
     print("서버 실행")
-    chat = ChatServer(("", 8001), ServerHandler)
-    chat.serve_forever()
-    chat.server_close()
+
+    while True:
+        clientSocket, client_address = server_socket.accept()
+        client_thread = threading.Thread(target=handle_client, args=(clientSocket, client_address))
+        client_thread.start()

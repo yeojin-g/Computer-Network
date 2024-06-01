@@ -6,25 +6,25 @@ users = {} # user 정보 목록
 clients = [] # client socket 목록
 rooms = {} # 채팅방 목록
 
-def read_user_file():
+def readUserFile():
     try:
         with open("onlineUsers.txt", 'r') as f:
             return f.read()
     except FileNotFoundError:
         return "파일을 찾을 수 없습니다."
 
-def update_users():
+def updateUsers():
     for clientSocket in clients:
-        userList = "\n\n<현재 접속 중인 User List>\n" + read_user_file()
+        userList = "\n\n<현재 접속 중인 User List>\n" + readUserFile()
         clientSocket.send(userList.encode())
 
-def write_user_file():
+def writeUserFile():
     with open("onlineUsers.txt", 'w') as f:
         for nickname, (ip, port, _) in users.items():
             user_data = f"Id: {nickname}\nIP: {ip}\nPort: {port}\n"
             f.write(user_data + '\n')
 
-def handle_client(clientSocket, client_address):
+def handleClient(clientSocket, client_address):
     ip, port = client_address
     print(f"클라이언트 {ip}:{port} 연결")
 
@@ -41,10 +41,10 @@ def handle_client(clientSocket, client_address):
             break 
 
     users[nickname] = [ip, port, clientSocket]
-    write_user_file()
-    update_users()
+    writeUserFile()
+    updateUsers()
     clients.append(clientSocket) # 사용자 socket 저장
-    userList = "<현재 접속 중인 User List>\n" + read_user_file()
+    userList = "<현재 접속 중인 User List>\n" + readUserFile()
     clientSocket.send(userList.encode())
 
     while True: # 명령어 검사 및 기능
@@ -100,8 +100,17 @@ def handle_client(clientSocket, client_address):
                 else:
                     clientSocket.send(f"{roomName}을 찾을 수 없습니다.".encode())
 
-            elif data == 'roomlist':
+            elif data == '/roomlist':
                 clientSocket.send(f"{rooms}".encode())
+            
+            elif data == '/exit':
+                clientSocket.send(f"메신저가 종료됩니다.".encode())
+                if nickname in users: # 사용자 삭제
+                    del users[nickname]
+                    writeUserFile()
+                    updateUsers()
+                    break
+            
             else:
                 clientSocket.send("명령어를 다시 입력 해주세요.".encode())
 
@@ -109,10 +118,7 @@ def handle_client(clientSocket, client_address):
             print(f"Error in {nickname}: {e}")
             break
 
-    if nickname in users: # 사용자 삭제
-        del users[nickname]
-        write_user_file()
-        update_users()
+    
 
 if __name__ == "__main__":
     HOST = "localhost"
@@ -126,5 +132,5 @@ if __name__ == "__main__":
 
     while True:
         clientSocket, client_address = server_socket.accept()
-        client_thread = threading.Thread(target=handle_client, args=(clientSocket, client_address))
+        client_thread = threading.Thread(target=handleClient, args=(clientSocket, client_address))
         client_thread.start()

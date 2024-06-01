@@ -8,14 +8,14 @@ import socket
 from threading import Thread
 import time
 
-def recv_msg(sock, users):
+def recvMsg(sock, users):
     while True:
         try:
             msg = sock.recv(1024).decode()
             if msg:
                 print(msg)
                 if msg.startswith("<현재 접속 중인 User List>"):
-                    parse_user_list(msg, users)
+                    parseUserList(msg, users)
                 elif msg.startswith("invite"):
                     sock.send(f"new room {msg.split(' ', 1)[1]}".encode())
             else:
@@ -23,7 +23,7 @@ def recv_msg(sock, users):
         except:
             break
 
-def parse_user_list(msg, users):
+def parseUserList(msg, users):
     lines = msg.split('\n')[1:]
     for line in lines:
         if line.startswith("Id:"):
@@ -34,7 +34,7 @@ def parse_user_list(msg, users):
             port = int(line.split(": ")[1])
             users[nickname] = (ip, port)
 
-def login_to_server(server_ip, server_port, users):
+def loginToServer(server_ip, server_port, users):
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.connect((server_ip, server_port))
     
@@ -47,14 +47,14 @@ def login_to_server(server_ip, server_port, users):
         elif "환영합니다." in msg:
             break
     
-    recv_thread = Thread(target=recv_msg, args=(sock, users))
+    recv_thread = Thread(recvMsg, args=(sock, users))
     recv_thread.daemon = True
     recv_thread.start()
     return sock
 
 if __name__ == "__main__":
     users = {}
-    cSocket = login_to_server("localhost", 8000, users)
+    cSocket = loginToServer("localhost", 8000, users)
     time.sleep(0.5) 
 
     print("-명령어 목록-")
